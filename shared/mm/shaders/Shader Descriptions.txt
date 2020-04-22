@@ -1,0 +1,31 @@
+oneLightNoTexture -
+
+Maintains fixed functionality vertex transformation.
+Matches fixed functionality lighting, except specularity is done per pixel.
+Only calculates lighting for LIGHT0.
+Does not attempt to apply textures.
+
+oneLight -
+
+Maintains fixed functionality vertex transformation.
+Matches fixed functionality lighting, except specularity is done per pixel.
+Only calculate lighting for LIGHT0.
+Applies textures for TEXTURE0 only, assuming a 2D texture, using GL_MODULATE.
+
+
+discardColorRange -
+
+Uniforms:
+
+vec3 color - the rgb values of the mean color values of the range to discard
+float epsilon - the extent of the color values from the mean to discard (should be slightly larger than 0 at the tightest)
+sample2D texture - texture to use
+
+Vertex Shader:
+
+Fixed Functionality
+
+Fragment Shader:
+
+Returns texel value of "texture" at given texture coordinate but discards all fragments whose texel value is within epsilon in rgb channels from "color."
+

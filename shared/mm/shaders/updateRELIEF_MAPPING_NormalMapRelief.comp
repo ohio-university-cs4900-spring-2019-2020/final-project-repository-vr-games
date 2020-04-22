@@ -1,0 +1,773 @@
+#version 430 compatibility
+#define USE_MESO_MATERIAL_PROPERTIES
+
+layout( rgba8 ) coherent uniform image2D nrmMap;
+layout( rgba8 ) coherent uniform image2D materialMap;
+layout( rgba8 ) coherent uniform image2D colorMap;
+layout( rgba8 ) coherent uniform image2D volumetricMap;
+layout( local_size_x = 16, local_size_y = 16 ) in;
+
+struct CSOutputBuffer
+{
+   //output values for a ray intersection against the mesostructure
+   vec2 uvOffset; ///< texture space offset for parallax motion
+   float hypotLen; ///< Length of the hypotenuse scaled to fit the macrostructure's geometry 
+   float depth; ///< normalized parametric depth into mesostructure as computed in rayIntersectDepthMap
+   vec4 normal; ///< model space collision normal at point of collision
+   vec4 xyzDispTS; ///< Tangent space displacement vector from original polygonal intersection to offset
+};
+
+struct CSInputBuffer
+{
+   //ray cast variables
+   vec4 startUV; ///< texture coordinate of the initial tex coord (UV) where relief map begins
+   vec4 tanDir; ///< tangent space vector in direction of collider's trajectory
+   vec2 curvXY; ///< per vertex interpolated curvature corresponding to startUV
+   vec2 uvScale; ///< per vertex interpolated uvScale values corresponding to startUV
+
+   //spherical / linear sine wave deformations
+   vec2 center; //0,0 is bottom left, negative is invalid for deformation
+   float radius; ///< radius of deformation
+   float deformScalar;
+   float phase; ///< used in linear sine wave, determines speed of waves
+
+   //control parameter determines which kernel is executed upon entering main()
+   unsigned int flag; //0=spherical deform,1=normal map generation,2=radial sine wave,3=rayCastReturnCollisionInfo
+};
+
+layout( std430, binding=1 ) buffer OutData
+{
+   CSOutputBuffer buf;
+} outDat;
+
+layout( std430, binding=5 ) buffer InData
+{
+   CSInputBuffer buf;
+} inDat;
+
+//layout( std430, binding=5 ) buffer MyData
+//{
+//   MyDataStruct vals[];
+//} myDat;
+
+//these 3 methods do an "apples to apples" cuda to compute shader
+//comparison
+void deformSphereExtrusionWithMaterialProperties();
+void performVolumetricDeformation();
+void performVolumetricDeformationWithAccumulation();
+void deformSphereExtrusion();
+void deformRadialSineWave();
+void generateNormalMapFromDispMap();
+void generateNormalMapFromDispMapSobel();
+void rayCastReturnCollisionInfo();
+void deformSphereIntrusion();
+float rayIntersectDepthMap( vec2 p, vec2 ds, uvec2 imageSize );
+void rayCastReturnCollisionCurvedInfo();
+float rayIntersectDepthMapCurved( vec2 tx, vec3 v, float tmax, float dataz, uvec2 imageSize );
+vec3 rayPositionCurved( float t, vec2 tx, vec3 v, float dataz );
+vec3 rayDisplacementCurved( float t, vec3 v, float dataz );
+
+void setHeightFieldToUniformHeight();
+
+void main()
+{
+   //////////////////////////////////////////////////////////
+   //this section is an "apples to apples" comparison against 
+   //the cuda implementation
+   //both have 2 dispatches and both use the same algorithm
+
+   //if( inDat.buf.flag == 3 )
+   //{
+   //   outDat.buf.uvOffset.x = 123.4;
+   //   outDat.buf.uvOffset.y = 123.4;
+   //   outDat.buf.hypotLen = 123.4;
+   //   outDat.buf.depth = 123.4;
+   //   outDat.buf.normal = vec3(76.3,23.3,354.3);
+   //}
+   //else
+   //{
+   //   outDat.buf.uvOffset.x = inDat.buf.startUV.x;
+   //   outDat.buf.uvOffset.y = inDat.buf.startUV.y;
+   //   outDat.buf.hypotLen = inDat.buf.radius;
+   //   outDat.buf.depth = float(inDat.buf.flag);
+   //   outDat.buf.normal.x = inDat.buf.tanDir.x;
+   //   outDat.buf.normal.y = inDat.buf.tanDir.y;    
+   //   outDat.buf.normal.z = inDat.buf.tanDir.z;
+   //}
+
+   if(      inDat.buf.flag == 0 )
+      deformSphereExtrusion();
+   else if( inDat.buf.flag == 1 )
+      generateNormalMapFromDispMap();
+   else if( inDat.buf.flag == 2 )
+      deformRadialSineWave();
+   else if( inDat.buf.flag == 3 )
+      rayCastReturnCollisionInfo();
+   else if( inDat.buf.flag == 4 )
+      rayCastReturnCollisionCurvedInfo();
+   else if( inDat.buf.flag == 5 )
+      setHeightFieldToUniformHeight();
+   else if( inDat.buf.flag == 6 )
+      deformSphereExtrusionWithMaterialProperties();
+   else if( inDat.buf.flag == 7 )
+      //performVolumetricDeformation();
+      performVolumetricDeformationWithAccumulation();
+
+   
+
+   return;
+   //////////////////////////////////////////////////////////
+}
+
+void setHeightFieldToUniformHeight()
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   if( pos.x < size.x && pos.y < size.y )
+   {
+      vec4 texel = imageLoad( nrmMap, pos );
+      float h = inDat.buf.deformScalar;
+      texel.a = h;
+      imageStore(nrmMap, pos, texel );
+   }
+}
+
+void deformSphereExtrusionWithMaterialProperties()
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   vec2 p = vec2( float(pos.x) / float(size.x), float(pos.y) / float(size.y) ); //floating point pos
+   vec2 c = inDat.buf.center; //floating point origin of sphere extrusion
+
+   float r = inDat.buf.radius;
+   float rsq = r * r;
+   float dsX = (p.x - c.x) * (p.x - c.x);
+   float dsY = (p.y - c.y) * (p.y - c.y);
+
+   if( true )//dsX + dsY <= rsq )
+   {
+      vec4 texel = imageLoad( nrmMap, pos );
+      float h = texel.a;
+
+      vec4 materialProp = imageLoad( materialMap, pos );
+      if( materialProp.r >= 0.0 && materialProp.r < 0.34 )
+      {
+         h += /*sqrt( rsq*15.0 - dsX - dsY) **/ ( inDat.buf.deformScalar * 0.01 ); // 'acid paint balls'
+      }
+      else if( materialProp.r >= 0.34 && materialProp.r < 0.67 )
+      {
+         if( dsX + dsY <= rsq )      
+            h += sqrt( rsq - dsX - dsY) * inDat.buf.deformScalar;
+      }
+      else if( materialProp.r >= 0.67 && materialProp.r <= 1.0 )
+      {
+         if( dsX + dsY <= rsq )      
+            h += sqrt( rsq - dsX - dsY) * inDat.buf.deformScalar;
+      }
+
+         
+      // if( materialProp.g > 0.9 )
+         // imageStore( colorMap, pos, vec4( 0, 0.0, 1.0, 1.0 ) );
+      // else
+         // imageStore( colorMap, pos, vec4( 0, 1.0, 0.0, 1.0 ) );
+      
+      if( true ) //does rotation / scale on the image-operator
+      {
+         mat4 rot;
+         mat4 rotImgOffset; //local rotation to align image operator with the image in the kernel
+         //float rotImgOffsetRad = degrees( -60.0 );
+         float rotImgOffsetRad = radians( 130 ); //130 deg rotation for the image to align it
+         
+         mat4 transA; //translates to origin
+         mat4 trans; //translate to final position of the image operator kernel
+         mat4 scale;
+         uvec2 sizeMat = imageSize( materialMap );
+         
+         vec4 texCoord = vec4( float(pos.x), float(pos.y), 0.0, 1.0 );
+         vec3 xdir = vec3( inDat.buf.tanDir.x, inDat.buf.tanDir.y, 0 );
+         xdir = normalize( xdir );
+         vec3 zdir = vec3( 0.0, 0.0, 1.0 );
+         vec3 ydir = cross( zdir, xdir );
+         
+         float incidenceAng = 0.5 * atan( -inDat.buf.tanDir.z / ( inDat.buf.tanDir.x + inDat.buf.tanDir.y ) );
+         incidenceAng = cos( incidenceAng );
+         
+         rot[0][0] = xdir[0]; rot[1][0] = ydir[0]; rot[2][0]  = zdir[0]; rot[3][0] = 0;
+         rot[0][1] = xdir[1]; rot[1][1] = ydir[1]; rot[2][1]  = zdir[1]; rot[3][1] = 0;
+         rot[0][2] = xdir[2]; rot[1][2] = ydir[2]; rot[2][2]  = zdir[2]; rot[3][2] = 0;
+         rot[0][3] = 0.0;     rot[1][3] = 0.0;     rot[2][3]  = 0.0;     rot[3][3] = 1.0;
+         
+         rotImgOffset[0][0] =  cos( rotImgOffsetRad ); rotImgOffset[1][0] = sin( rotImgOffsetRad ); rotImgOffset[2][0]  = 0.0; rotImgOffset[3][0] = 0.0;
+         rotImgOffset[0][1] = -sin( rotImgOffsetRad ); rotImgOffset[1][1] = cos( rotImgOffsetRad ); rotImgOffset[2][1]  = 0.0; rotImgOffset[3][1] = 0.0;
+         rotImgOffset[0][2] = 0.0;                     rotImgOffset[1][2] = 0.0;                    rotImgOffset[2][2]  = 1.0; rotImgOffset[3][2] = 0.0;
+         rotImgOffset[0][3] = 0.0;                     rotImgOffset[1][3] = 0.0;                    rotImgOffset[2][3]  = 0.0; rotImgOffset[3][3] = 1.0;
+         
+         transA[0][0] = 1.0; transA[1][0] = 0.0; transA[2][0]  = 0.0; transA[3][0] = -0.5 * float(sizeMat.x);
+         transA[0][1] = 0.0; transA[1][1] = 1.0; transA[2][1]  = 0.0; transA[3][1] = -0.5 * float(sizeMat.y);
+         transA[0][2] = 0.0; transA[1][2] = 0.0; transA[2][2]  = 1.0; transA[3][2] = 0.0;
+         transA[0][3] = 0.0; transA[1][3] = 0.0; transA[2][3]  = 0.0; transA[3][3] = 1.0;
+         
+         trans[0][0] = 1.0; trans[1][0] = 0.0; trans[2][0]  = 0.0; trans[3][0] = outDat.buf.uvOffset.x * float(sizeMat.x);
+         trans[0][1] = 0.0; trans[1][1] = 1.0; trans[2][1]  = 0.0; trans[3][1] = outDat.buf.uvOffset.y * float(sizeMat.y);
+         trans[0][2] = 0.0; trans[1][2] = 0.0; trans[2][2]  = 1.0; trans[3][2] = 0.0;
+         trans[0][3] = 0.0; trans[1][3] = 0.0; trans[2][3]  = 0.0; trans[3][3] = 1.0;
+         
+         scale[0][0] = incidenceAng; scale[1][0] = 0.0; scale[2][0]  = 0.0; scale[3][0] = 0.0;
+         scale[0][1] = 0.0         ; scale[1][1] = 0.5; scale[2][1]  = 0.0; scale[3][1] = 0.0;
+         scale[0][2] = 0.0         ; scale[1][2] = 0.0; scale[2][2]  = 1.0; scale[3][2] = 0.0;
+         scale[0][3] = 0.0         ; scale[1][3] = 0.0; scale[2][3]  = 0.0; scale[3][3] = 1.0;
+      
+         mat4 texMatCompShdrtoUniform = trans * rot * scale * rotImgOffset * transA;
+         texMatCompShdrtoUniform = inverse( texMatCompShdrtoUniform );
+         vec4 texCoordPrime = texMatCompShdrtoUniform * texCoord;
+         
+         vec4 uniformColor = imageLoad( materialMap, ivec2( int(texCoordPrime.x), int(texCoordPrime.y) ) );
+         
+         ivec2 tC = ivec2( int( texCoord.x ), int( texCoord.y ) );
+         if( uniformColor.g > 0.9 )
+         {
+            if( ! ( materialProp.r >= 0.67 && materialProp.r <= 1.0 ) )
+            {
+               imageStore( colorMap, tC, vec4( 0, 1.0, 1.0, 1.0 ) );//vec4( uniformColor.g, 0, 0, 1.0 ) );
+            }
+            texel.a = h;
+            imageStore(nrmMap, pos, texel );
+         }
+      }
+
+      //generateNormalMapFromDispMap( pos, size, texel );
+      //generate new normal map only for affected pixels
+   }   
+}
+
+void performVolumetricDeformation()
+{
+   uvec2 size = imageSize( volumetricMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+   vec4 texel = imageLoad( volumetricMap, pos );
+   vec4 nrmTex = imageLoad( nrmMap, pos );
+
+   imageStore( nrmMap, pos, vec4( nrmTex.x, nrmTex.y, nrmTex.z, texel.r ) );
+}
+
+void performVolumetricDeformationWithAccumulation()
+{
+   uvec2 size = imageSize( volumetricMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+   
+   float depth = imageLoad( volumetricMap, pos ).r;
+   vec4 nrmTex = imageLoad( nrmMap, pos );
+   
+   //the depth values from volumetricMap must be properly mapped to the depth space of nrmMap's height map.
+   //depth is the linear distance between the ortho near/far plane. so depth / 
+   
+   
+   //1. map the entire range of the height map's displace into a world space value. this is the THICKNESS, T of the meso
+   //T = d * depth * scaleFactorOfModel; // depth is .1, scaleFactorOfModel is 10.0, d is depth from texture between [0,1]
+   //depth buffer in orthographic view is linear
+   
+   
+   //cameraZ = ((clipZ + (zFar + zNear)/(zFar - zNear)) * (zFar - zNear))/-2
+   
+   if( depth.r < nrmTex.a )
+      imageStore( nrmMap, pos, vec4( nrmTex.x, nrmTex.y, nrmTex.z, depth ) );
+}
+
+void deformSphereExtrusion()
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   vec2 p = vec2( float(pos.x) / float(size.x), float(pos.y) / float(size.y) ); //floating point pos
+   vec2 c = inDat.buf.center; //floating point origin of sphere extrusion
+
+   float r = inDat.buf.radius;
+   float rsq = r * r;
+   float dsX = (p.x - c.x) * (p.x - c.x);
+   float dsY = (p.y - c.y) * (p.y - c.y);
+
+   if( dsX + dsY <= rsq )
+   {
+      vec4 texel = imageLoad( nrmMap, pos );
+      float h = texel.a;
+
+      h += sqrt( rsq - dsX - dsY) * inDat.buf.deformScalar;  
+
+      texel.a = h;      
+
+      imageStore(nrmMap, pos, texel );
+      //generateNormalMapFromDispMap( pos, size, texel );
+      //generate new normal map only for affected pixels
+   }   
+}
+
+void deformRadialSineWave()
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   vec2 p = vec2( float(pos.x) / float(size.x), float(pos.y) / float(size.y) ); //floating point pos
+   vec2 c = inDat.buf.center; //floating point origin of sphere extrusion
+
+   float distX = p.x - inDat.buf.center.x;
+   float distY = p.y - inDat.buf.center.y;
+
+   if( pos.x >= size.x || pos.y >= size.y )
+      return;
+
+   float dX = distX * distX;
+   float dY = distY * distY;
+   //float rsq =radius * (float)radius;
+
+   float dist = sqrt( dX + dY );
+
+   const float waveLength = 0.25; // 1/4 of image width (on axis) is one full wavelength (2PI rads)
+   const float TWOPI = 2.0 * 3.14159265359;
+   float myInput = ((dist + inDat.buf.phase) / waveLength) * TWOPI;
+
+   float disp = sin( myInput );
+   disp *= 0.03; //decrease amplitude by half   
+   
+   vec4 texel = imageLoad( nrmMap, pos );
+   float height = texel.a;
+   height += disp;
+
+   height = clamp( height, 0.05, 1.0 ); //eliminate holes from forming
+   
+   imageStore( nrmMap, pos, vec4( texel.xyz, height ) );
+}
+
+void generateNormalMapFromDispMap() // ivec2 pos, uvec2 size, vec4 texel )
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   if( pos.x >= size.x || pos.y >= size.y )
+      return;
+
+//memoryBarrierImage();
+//memoryBarrier();
+//memoryBarrierShared();
+//memoryBarrierBuffer();
+//memoryBarrierAtomicCounter();
+//groupMemoryBarrier();
+
+   vec4 texel = imageLoad( nrmMap, pos );
+
+   int x = pos.x;
+   int y = pos.y;
+   int dv = 1;
+   int du = 1;
+   float scale = 0.25;
+
+   int sp = 2; //secondary pixel offset to weight averagely with 
+
+   int hLt = x; //height on left of this pixel
+   int hRt = x; //height on right of this pixel
+
+   int hLt2 = x; //height on left of this pixel
+   int hRt2 = x; //height on right of this pixel
+
+   int hUp = y; //height on top of this pixel
+   int hDn = y; //height on bottom of this pixel
+
+   int hUp2 = y; //height on top of this pixel
+   int hDn2 = y; //height on bottom of this pixel
+
+   //clamp to avoid going beyond the edges in V direction
+   if( (hUp + dv) < size.y )
+      hUp += dv;
+   if( (hDn - dv) >= 0 )
+      hDn -= dv;
+
+   if( (hUp2 + dv + sp) < size.y )
+      hUp2 += dv + sp;
+   if( (hDn2 - dv - sp) >= 0 )
+      hDn2 -= dv - sp;
+
+   //clamp to avoid going beyond the edges in U direction
+   if( (hLt - du) >= 0 )
+      hLt -= du;
+   if( (hRt + du) < size.x )
+      hRt += du;
+
+   if( (hLt2 - du - sp) >= 0 )
+      hLt2 -= du - sp;
+   if( (hRt2 + du + sp) < size.x )
+      hRt2 += du + sp;
+
+
+   //now read the displacement map values from the image2D
+   //imageLoad( nrmMap, ivec2( 174, 156 ) );
+   float me     = imageLoad(nrmMap, ivec2( x, y ) ).a    * 255.0;
+   float left   = imageLoad(nrmMap, ivec2( hLt, y ) ).a  * 255.0;
+   float right  = imageLoad(nrmMap, ivec2( hRt, y ) ).a  * 255.0;
+   float left2  = imageLoad(nrmMap, ivec2( hLt2, y ) ).a * 255.0;
+   float right2 = imageLoad(nrmMap, ivec2( hRt2, y ) ).a * 255.0;
+   float top    = imageLoad(nrmMap, ivec2( x, hUp ) ).a  * 255.0;
+   float bot    = imageLoad(nrmMap, ivec2( x, hDn ) ).a  * 255.0;
+   float top2   = imageLoad(nrmMap, ivec2( x, hUp2 ) ).a * 255.0;
+   float bot2   = imageLoad(nrmMap, ivec2( x, hDn2 ) ).a * 255.0;
+
+   float dhdv = (( top   - (bot) ) * 0.6f ) + ( (top2)   - (bot2)  ) * 0.4f;
+   float dhdu = (( right - (left)) * 0.6f ) + ( (right2) - (left2) ) * 0.4f;
+
+   dhdv *= -1.0;
+   dhdu *= -1.0;
+
+   dhdv = scale / ( 2.0 * float(dv) ) * dhdv;
+   dhdu = scale / ( 2.0 * float(du) ) * dhdu;
+
+   //float dZ = 0.25 * sqrt( 1.0 - dhdu * dhdu - dhdv * dhdv );
+
+   vec3 norm = vec3( dhdu, dhdv, 1.0 );
+   norm = normalize( norm );
+   vec3 intVer = vec3( int(127.5*(norm.x+1.0)),int(127.5*(norm.y+1.0)),int(127.5*(norm.z+1.0)) );//, texel.a );
+   intVer /= 255;
+
+   texel = vec4( intVer, texel.a );
+
+   imageStore(nrmMap, pos, texel );
+
+//memoryBarrierImage();
+//memoryBarrier();
+//memoryBarrierShared();
+//memoryBarrierBuffer();
+//memoryBarrierAtomicCounter();
+//groupMemoryBarrier();
+
+}
+
+void generateNormalMapFromDispMapSobel()
+{
+   uvec2 size = imageSize( nrmMap );
+   ivec2 pos = ivec2( gl_GlobalInvocationID.xy );
+
+   int x = pos.x;
+   int y = pos.y;
+
+   int du = 1;
+   int dv = 1;
+   float scale = 0.25;
+
+   if( x >= size.x || y >= size.y/2 )
+      return;
+
+   vec4 texel = imageLoad( nrmMap, pos );
+
+   
+   //   unsigned char me    = imageLoad( x, y, dispMap, imgw );
+   //left
+   float tl = imageLoad( nrmMap, ivec2(x - du, y + dv )).a;
+   float  l = imageLoad( nrmMap, ivec2(x - du,      y )).a;
+   float bl = imageLoad( nrmMap, ivec2(x - du, y - dv )).a;
+                                                          
+   //middle                                               
+   float  t = imageLoad( nrmMap, ivec2(x,      y + dv )).a;
+   float me = imageLoad( nrmMap, ivec2(x,           y )).a;
+   float  b = imageLoad( nrmMap, ivec2(x,      y - dv )).a;
+                                                          
+   //right                                                
+   float tr = imageLoad( nrmMap, ivec2(x + du, y + dv )).a;
+   float  r = imageLoad( nrmMap, ivec2(x + du,      y )).a;
+   float br = imageLoad( nrmMap, ivec2(x + du, y - dv )).a;
+ 
+    // Compute dx using Sobel:
+    //           1 0 -1 
+    //           2 0 -2
+    //           1 0 -1
+    //float dX = tr + 2.0 * r + br - tl - 2.0 * l - bl;
+    float dX = 1.0 * tl + -1.0 * tr +
+               2.0 *  l + -2.0 * r +
+               1.0 * bl + -1.0 * br;
+ 
+    // Compute dy using Sobel:
+    //          -1 -2 -1
+    //           0  0  0
+    //           1  2  1
+    //float dY = bl + 2.0 * b + br - tl - 2.0 * t - tr;
+    float dY = -1.0 * tl + -2.0 * t + -1.0 * tr +
+                1.0 * bl +  2.0 * b +  1.0 * br;
+
+   // Generate the missing Z component - tangent
+   // space normals are +Z which makes things easier
+   // The 0.5f leading coefficient can be used to control
+   // how pronounced the bumps are - less than 1.0 enhances
+   // and greater than 1.0 smoothes.
+	float dZ = 0.25 * sqrt( 1.0 - dX * dX - dY * dY );
+
+   // Build the normalized normal
+   vec3 norm = vec3( 2.0 * dX, 2.0 * dY, dZ );
+   norm = normalize( norm );
+
+   vec3 intVer = vec3( int(127.5*(norm.x+1.0)),int(127.5*(norm.y+1.0)),int(127.5*(norm.z+1.0)) );//, texel.a );
+   intVer /= 255;
+
+   texel = vec4( intVer, me );//packSnorm4x8
+
+   //outDat.buf.b = texel; //not needed was used for debugging
+
+   memoryBarrierImage();
+   imageStore(nrmMap, pos, texel );
+}
+
+void rayCastReturnCollisionInfo()
+{
+   //reimplement same code as in test.cu:1545
+   //which then calls test.cu:1457
+   //this right now, just returns the information, but doesn't deform the surface
+   //we wait to deform the surface until an actual collision occurs
+
+////ray cast variables
+//vec2 startUV; ///< texture coordinate of the initial tex coord (UV) where relief map begins
+   //inDat.buf.startUV;
+//vec3 tanDir; ///< tangent space vector in direction of collider's trajectory
+
+   const float DEPTH = 0.1;
+
+   if( gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0 )
+   {
+      //this is the main thread; we just compute the answer in one thread
+      uvec2 imageSize = imageSize( nrmMap );
+
+      vec3 stepDir = vec3( inDat.buf.tanDir );
+      stepDir.z *= -1.0;
+      vec2 ds = vec2( stepDir.x * DEPTH / stepDir.z, stepDir.y * DEPTH / stepDir.z );
+
+      float depth = rayIntersectDepthMap( inDat.buf.startUV.xy, ds, imageSize );
+
+      vec2 uvPrime = inDat.buf.startUV.xy + ds * depth; //gets populated with the parallax shifted texture coordinate
+
+            //compute the magnitude to scale 'stepDir' by to compute precise location (when displaced3DPos = 'stepDir' * scale + surfaceContactPt)
+      float aa = sqrt( ( dot( ds*depth*10.0, ds*depth*10.0 ) ) );
+      float bb = depth * DEPTH * 10.0;
+      float cc = sqrt( aa*aa + bb*bb );
+
+      //populate the output buffer with the results
+//vec2 uvOffset; ///< texture space offset for parallax motion
+//float hypotLen; ///< Length of the hypotenuse scaled to fit the macrostructure's geometry 
+//float depth; ///< normalized parametric depth into mesostructure as computed in rayIntersectDepthMap
+//vec3 normal; ///< model space collision normal at point of collision
+      outDat.buf.uvOffset = uvPrime;
+      outDat.buf.hypotLen = cc;
+      outDat.buf.depth = depth;
+      
+      //get contact normal at uvPrime
+      vec4 texel = imageLoad( nrmMap, ivec2( int( uvPrime.x * imageSize.x + 0.5 ), int( uvPrime.y * imageSize.y + 0.5 ) ) );
+
+      //unpack vec3 normal
+      float nx = 2.0 * texel.x - 1; //unpack from (unsigned)RGB to (signed)XYZ
+      float ny = 2.0 * texel.y - 1;
+      float nz = 2.0 * texel.z - 1;
+
+      //outDat.buf.normal = /*normalize(*/vec3(nx,ny,nz);//);
+      outDat.buf.normal = vec4(nx,ny,nz,0);
+   }
+}
+
+// Assumes the depth map is stored in the alpha channel of the image2D in the range [0,1].
+float rayIntersectDepthMap( vec2 p, vec2 ds, uvec2 imageSize )
+{
+   const int linear_search_steps = 30;
+   const int binary_search_steps = 5;
+   float depth_step = 1.0 / linear_search_steps;
+   float size = depth_step; // current size of search window
+   float depth = 0.0; // current depth position (more like the current parametric value along ds, 0 is point A, 1 is point B)
+   
+   // best match found thus far (starts with last position 1.0)
+   float best_depth = 1.0; //first point below the surface
+   //search from front to back for first point inside the object
+   //   this for loop performs the linear march along vector A->B which finds the first linearly
+   //   spaced point under the height field this result depth is used
+   //   as the anchor in the binary search
+
+   vec2 uv;
+   for( int i = 0; i < linear_search_steps - 1; i++ )
+   {
+      depth += size;
+
+      uv = p + ds * depth;
+      //uchar4 charW = getPixel( (int)(uv.x * W + 0.5), (int)(uv.y * H + 0.5 ) ); //CUDA VERSION
+      vec4 charW = imageLoad( nrmMap, ivec2( int( uv.x * imageSize.x + 0.5 ), int( uv.y * imageSize.y + 0.5 ) ) );
+      //float w = ((float) charW.w ) / 255.0; //CUDA VERSION
+      float w = charW.a; //compute shader already returns value normalized [0,1]
+
+
+      w = 1.0 - w; //Scott Nykl: If using a " height map ", then we must do a 1 - t to treat value as a " depth map "
+      if( best_depth > 0.996 ) // if no depth found yet
+         if( depth >= w )
+            best_depth = depth; // store best depth
+   }
+   depth = best_depth;
+
+   //// search around first point (depth) for closest match
+   for( int i = 0; i < binary_search_steps; i++ )
+   {
+      size *= 0.5;
+
+      uv = p + ds * depth;
+      //uchar4 charW = getPixel( (int)(uv.x * W + 0.5), (int)(uv.y * H + 0.5 ) ); 
+      vec4 charW = imageLoad( nrmMap, ivec2( int( uv.x * imageSize.x + 0.5 ), int( uv.y * imageSize.y + 0.5 ) ) );
+      //float w = ((float) charW.w ) / 255.0;
+      float w = charW.a; //compute shader already returns value normalized [0,1]
+
+      w = 1 - w;
+      if (depth >= w)
+      {
+         best_depth = depth;
+         depth -= 2 * size;
+      }
+      depth += size;
+   }
+   return best_depth;
+}
+
+void rayCastReturnCollisionCurvedInfo()
+{
+   if( gl_GlobalInvocationID.x == 0 && gl_GlobalInvocationID.y == 0 )
+   {
+      
+      //Quadric curvature for the sphere
+      //Quadric: (0.27282, 0.27290, 0.00000)
+      
+      
+      vec2 VSCurvature = vec2( inDat.buf.curvXY.x, inDat.buf.curvXY.y );
+      vec2 VSuv = vec2( inDat.buf.startUV.xy );
+      vec3 VSview = vec3( inDat.buf.tanDir.xyz );
+      vec3 VSscale = vec3( inDat.buf.uvScale.x, inDat.buf.uvScale.y, 0.5 ); //matches vertex shader output
+      ////
+      uvec2 imageSize = imageSize( nrmMap );
+      
+      //Ensure that VSuv is normalized to floating point values in the range [-1,1]
+      VSuv.x = float(VSuv.x) - float(int(VSuv.x)); //same as fract(VSuv.x)
+      VSuv.y = float(VSuv.y) - float(int(VSuv.y));
+      
+      
+      vec3 v = normalize( VSview );
+      v.z *= -1;
+      
+      // mapping scale from object to texture space
+      vec3 mapping = 1.0 / (VSscale);
+            
+      // quadric constants
+      float dataz = VSCurvature.x * v.x * v.x + VSCurvature.y * v.y * v.y;
+      // if( abs( dataz ) < 0.0001 )
+      // {
+         // if( dataz < 0 )
+            // dataz = -0.001;
+         // else
+            // dataz = 0.001;
+      // }
+      dataz = sign( dataz ) * max( abs( dataz ), 0.001 );
+      
+      // compute max distance for search min(t(z=0),t(z=1))
+      float d = v.z * v.z - 4 * dataz * VSscale.z;
+      float tmax = 50;
+      if( d > 0 ) //t when z = 1
+         tmax = min( tmax, ( -v.z + sqrt(d) ) / ( -2.0 * dataz ) );
+      d = v.z / dataz;	// t when z=0
+      if( d > 0 )
+         tmax = min( tmax,d );
+         
+      // transform view and quadric data to texture space
+      v *= mapping;
+      dataz *= mapping.z;
+      
+      float t = rayIntersectDepthMapCurved( VSuv, v, tmax, dataz, imageSize );
+      outDat.buf.depth = t;
+      outDat.buf.hypotLen = t; //t is both depth an hypot because it has been scaled by the UV coord in texture space
+      if( t > tmax )
+      {
+         outDat.buf.depth = -1.0; //Notify the CPU that no intersection has occurred
+         outDat.buf.hypotLen = -1.0;
+      }
+         
+      // compute intersected position
+      vec3 p = rayPositionCurved( t, VSuv, v, dataz );
+      vec2 uv = p.xy;
+      vec3 rayDispCurved = rayDisplacementCurved( t, v, dataz );
+      
+      //vec3 normal = imageLoad( nrmMap, p.xy ).xyz;
+      ivec2 pixel = ivec2( int(p.x * imageSize.x + 0.5), int(p.y * imageSize.y + 0.5) );
+      
+      vec3 normal = imageLoad( nrmMap, pixel ).xyz;
+      //normal = normalize( normal - 0.5 ); //SLN perhaps not necessary
+      //SLN take from above... May need to ensure normal vector is properly unpacked from texture into a vector
+      ///// expand normal from normal map in local polygon space
+      normal.xyz = normalize( normal.xyz * 2.0 - 1.0 );
+      
+      //compute the 3D collision point in tangent space since that's the only vector we have access to
+      vec3 ddview = normalize( VSview.xyz );
+      vec3 tanSpaceDisp = ddview * t;
+      
+      outDat.buf.uvOffset[0] = p.x;//inDat.buf.uvScale.x;
+      outDat.buf.uvOffset[1] = p.y;//inDat.buf.uvScale.y;
+      
+      outDat.buf.xyzDispTS[0] = tanSpaceDisp.x;
+      outDat.buf.xyzDispTS[1] = tanSpaceDisp.y;
+      outDat.buf.xyzDispTS[2] = tanSpaceDisp.z;
+      outDat.buf.xyzDispTS[3] = float(pixel.x) / float(imageSize.x);
+      
+      outDat.buf.normal[0] = normal.x;
+      outDat.buf.normal[1] = normal.y;
+      outDat.buf.normal[2] = normal.z;
+      outDat.buf.normal[3] = float(pixel.y) / float(imageSize.y);
+   }
+}
+
+float rayIntersectDepthMapCurved( vec2 tx, vec3 v, float tmax, float dataz, uvec2 imageSize )
+{
+   const int linear_search_steps = 64;
+
+   float t = 0.0;
+   float size = ( tmax + 0.001 ) / linear_search_steps;
+
+   // search front to back for first point inside object
+   for( int i = 0; i < linear_search_steps; i++ )
+   {
+		vec3 p = rayPositionCurved( t, tx, v, dataz );
+      //float tex = 1.0 - imageLoad( nrmMap, p.xy ).w;
+      ivec2 pixel = ivec2( int(p.x * imageSize.x + 0.5) % imageSize.x, int(p.y * imageSize.y + 0.5) % imageSize.y );
+		float tex = 1.0 - imageLoad( nrmMap, pixel ).w;
+		if( p.z < tex )
+			t += size;
+   }
+
+   const int binary_search_steps = 5;
+
+   // recurse around first point for closest match
+   for( int i = 0; i < binary_search_steps; i++ )
+   {
+      size *= 0.5;
+      vec3 p = rayPositionCurved( t, tx, v, dataz );
+      ivec2 pixel = ivec2( int(p.x * imageSize.x + 0.5) % imageSize.x, int(p.y * imageSize.y + 0.5) % imageSize.y );
+      //ivec2( int( uv.x * imageSize.x + 0.5 ), int( uv.y * imageSize.y + 0.5 ) ) 
+      float tex = 1.0 - imageLoad( nrmMap, pixel ).w;
+      if( p.z < tex )
+         t += 2 * size;
+      t -= size;
+   }
+   return t;
+}
+
+vec3 rayPositionCurved( float t,      // search parameters
+                        vec2 tx,      // original pixel texcoord
+                        vec3 v,       // view vector in texture space
+                        float dataz ) // data constants
+{
+	vec3 r = v * t;
+	r.z -= t * t * dataz;
+	r.xy += tx;
+	return r;
+}
+
+vec3 rayDisplacementCurved( float t,      // search parameters
+                            vec3 v,       // view vector in texture space
+                            float dataz ) // data constants
+{
+	vec3 r = v * t;
+	r.z -= t * t * dataz;
+	return r;
+}

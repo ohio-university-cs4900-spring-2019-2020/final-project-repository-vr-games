@@ -1,0 +1,5 @@
+64x256
+
+Major axis at 10, 127 Line width 5 pixels, ending at 42 pixels (32 pixels long) rectangular
+
+Two minor axis

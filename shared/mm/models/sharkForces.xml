@@ -1,0 +1,13 @@
+<AbstractForces>
+  <Buoyancy>
+    <7,6,1,.297>
+    <7,-6,1,.297>
+    <-7,6,1,.297>
+    <-7,-6,1,.297>
+  </Buoyancy>
+  <Thruster>
+    <0,12,0,67>
+    <0,-12,0,67>
+    <0,0,0,120>
+  </Thruster>
+</AbstractForces>

@@ -1,0 +1,72 @@
+Animation: 
+
+Step 1:
+
+Model your object in blender
+  - Break up each piece that you want animation into it's own wrl file (export to vrml)
+        - It would be helpful to have a blender file for each piece
+        - It is important to have the whole object in one file to help place locations
+
+Step 2:
+
+Create an animation file:
+
+Format as followed:
+
+<animation=[animation name goes here]>
+<joint> --  ***in the joint opening tag you may add an equal sign and the name of the joint 		to help determine what you animatiing**** This will improve with the 
+[6 float/double values for each keyframe]
+PHI THETA ROLL X Y Z
+[example]
+1.2 3.4 5 6.7 8.9 3
+0 0 5 0 0 0
+</joint>
+[do this for as many joints that you want animated]
+<joint>
+</joint>
+[closing animation tag]
+</animation>
+
+Step 3:
+
+inside of your constructor (function in which you create each an object for each piece):
+
+create an animation object (whether it is a member variable or just a local)
+ - pass in the text file with the animation inside of it
+
+create a temport WOGJoint to build your objects and a vector to store these joints
+ ****Must be in the order in that you created your animation file*****
+
+create your new ghost world object
+ - set the position
+ - set the parent 
+ - push it back on the parent children list
+
+Create a new joint with the above world object you just created as its parameter
+ - if you don't pass any value in the joint will be created at the center point of 
+   the parent ( might not be what you want)
+ - pass a vector for the position of the joint relative to the parent as a parameter
+ - These next 2 parameters are coupled (if you don't know what you are doing dont bother passing either)
+      - pass in a Vector of the look direction for the joint
+      - pass in the normal of that look direction vector you just passed (have to do the math yourself)
+
+
+now call lockWRTParent on the world object you created with the new joint as a parameter
+
+push back the temp joint onto the vector of joints you created earlier
+ *** make sure of the order you are pushing, it must match the text file or your animation will act funny***
+
+rinse and repeat for every object you want animated
+
+once finished
+
+grab the base object (usually the parent) and call setCurrentAnimation( name of your animation )
+
+
+it should now animate all the time
+
+
+to stop animation call setCurrentAnimation on that same object and pass it in NULL
+
+
+

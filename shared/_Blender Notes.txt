@@ -1,0 +1,71 @@
+Some of the blender files have a "_pp" postfix.
+
+PP stands for Post Processed.  These are blender model files that have the following
+transformations applied in this order:
+
+	A. Have had all Meshes joined to make 1 Object.
+		1. Select all meshes ('A')
+		2. Goto Object -> Join ('Ctrl+J')
+		3. Confirm the join in the prompt.
+	B. Have their "front" facing directly along the positive X axis and
+           Have their "top" pointing directly along the positive Z axis.
+           ***If you do not know EXACTLY what this means, see "Orientation Of Models in Blender" below.
+		1. Select the object. (should only be one, see step A)
+		2. Press R, the rotate the object to the desired orienation.
+	C. Have had all Quads Converted to Triangles.	
+		1. Select the object (should only be one, see step A)
+		2. Switch to "Edit" mode.
+		3. Goto Mesh -> Faces -> Convert Quads to Triangles ('Ctrl+T')
+	D. Have all transform information "applied".
+		1. Select the object.
+		2. Switch to "Object" mode.
+		3. Goto Object -> Clear/Apply -> Apply Scale/Rotation ('Ctrl+A')
+	E. Have the model center (pink dot) at center of model.
+		1. Select the object. (Object mode)
+		2. Goto Object -> Transform -> Center new.
+	F. Now ready to generate a wrl (VRML) file.
+		1. Goto File -> Export -> VRML 1.0
+		2. Type in a name, and goto desired location (/models/*.wrl)
+		3. Open the VRML file in a text editor and change the texure reference
+		   from "//whatever.jpg" to "//../models/whatever.jpg"
+
+These steps are necessary to get the VRML properly loaded into the graphics engine, and to ensure they are oriented the way we want.  
+
+I try to "branch" the blender files before these operations are performed because after these operations have been performed, it becomes more difficult to go back and manipulate the model if a change is necessary (near impossible).
+
+So, before you do the steps above to your project:
+
+	1. File --> Save As...
+	2. Save as "my_filename_pp.blend" (obviously, replace 'my_filename')
+	3. Commit _pp.blend to subversion, and use IT for generating wrl files
+
+If a change is needed, modify the ORIGINAL (which will be easier), then regenerate the _pp.blend and the wrl if desired.
+
+Thanks,
+
+The Management
+
+
+------------------------------------
+Orientation Of Models in Blender
+------------------------------------
+
+Ensure ALL models are in this alignment in blender before exporting them to VRML...
+
+Assume we are orienting a BMW car with a  BMW hood ornament on the very front of its hood. The steering wheel is on the "left side" of the car (standard steering wheel position in the US)
+
+1) The car model is centered at the origin
+2) The car model is facing forwards along the positive x-axis. That is, the hood ornament is the part of the car furthest along the positive x-axis.
+3) The back of the lies along (points towards) the negative x-axis.
+4) The top of the car is furthest along the positive z-axis.
+5) The bottom of the car lies along (points towards) the negative z-axis.
+
+For a diagram see /steamie/multimedia/orientationExample.JPG
+
+
+
+I have added a PICTURE into the repo describing the above scenario.... \steamie\multimedia\orientationExample.JPG
+
+-Scott
+
+
