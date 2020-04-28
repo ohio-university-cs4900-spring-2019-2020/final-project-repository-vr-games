@@ -31,12 +31,13 @@
 
 //WONVPhysX include
 #include "WONVPhysX.h"
-#include "../../PhysX-4.1/physx/include/PxPhysicsAPI.h"
+#include "../../physx/include/PxPhysicsAPI.h"	//Eddie's path to PhysX folder
 #include "WONVDynSphere.h"
 #include "AftrGLRendererBase.h"
 #include "WOGUILabel.h"
 
 #include "NetMsgAntGsSetback.h"
+
 
 //If we want to use way points, we need to include this.
 #include "NewModuleWayPoints.h"
@@ -44,6 +45,7 @@
 #include <iostream>
 
 using namespace Aftr;
+using namespace physx;
 
 
 
@@ -88,6 +90,7 @@ void GLViewNewModule::onCreate()
    }
    this->setActorChaseType( STANDARDEZNAV ); //Default is STANDARDEZNAV mode
    //this->setNumPhysicsStepsPerRender( 0 ); //pause physics engine on start up; will remain paused till set to 1
+
 }
 
 
@@ -102,7 +105,7 @@ void GLViewNewModule::updateWorld()
    GLView::updateWorld(); //Just call the parent's update world first.
                           //If you want to add additional functionality, do it after
                           //this call.
-   WONVPhysX::physUpdate();
+   //WONVPhysX::physUpdate();
    if (GLViewNewModule::moveUp == true)
 	   carX++;
    if (GLViewNewModule::moveDown == true)
@@ -152,21 +155,21 @@ void GLViewNewModule::onKeyDown( const SDL_KeyboardEvent& key )
    }
 
    if (key.keysym.sym == SDLK_UP) { //move car forward
-	   //carX++;
+	   carX++;
 	   moveUp = true;
    }
    else if (key.keysym.sym == SDLK_DOWN) {//move car backwards
-	   //carX--;
+	   carX--;
 	   moveDown = true;
 
    }
    else if (key.keysym.sym == SDLK_LEFT) {//move car left
-	   //carY++;
+	   carY++;
 	   moveLeft = true;
 
    }
    else if (key.keysym.sym == SDLK_RIGHT) {//move car right
-	   //carY--;
+	   carY--;
 	   moveRight = true;
 
    }
@@ -210,7 +213,8 @@ void GLViewNewModule::onKeyUp( const SDL_KeyboardEvent& key )
 }
 
 void GLViewNewModule::physXInit() {
-	/*PxDefaultAllocator a;
+	/*
+	PxDefaultAllocator a;
 	PxDefaultErrorCallback e;//this requires either extensions or inheriting
 	PxFoundation* f = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
 	PxPhysics* p = xCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
@@ -218,8 +222,8 @@ void GLViewNewModule::physXInit() {
 	//Some configuration return a null scene without setting the following
 		sc.filterShader = physx::PxDefaultSimulationFilterShader;
 	sc.cpuDispatcher = physx::PxDefaultCpuDispatcherCreate(2);
-	PxScene* scene = p->createScene(s);*/
-
+	PxScene* scene = p->createScene(s);
+	*/
 }
 
 
@@ -315,6 +319,15 @@ void Aftr::GLViewNewModule::loadMap()
    wo->setLabel("Car");
    worldLst->push_back(wo);
 
+   //create track
+   std::string track(ManagerEnvironmentConfiguration::getLMM() + "models/track.blend");
+   wo = WO::New(track, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);
+   //wo = WONVPhysX::New(track, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);	//use for collisions?
+   wo->setPosition(Vector(0,0,0));
+   wo->setLabel("track");
+   worldLst->push_back(wo);
+
+
    //code for WO for Networking module
    NetMsgAntGsSetback();
 
@@ -328,6 +341,7 @@ void Aftr::GLViewNewModule::loadMap()
    label->setFontOrientation(FONT_ORIENTATION::foLEFT_TOP);
   // label->setFontPath("/COMIC.TTF");//ERROR here!!
    worldLst->push_back(label);
+
 
 
    ////Create the infinite grass plane that uses the Open Dynamics Engine (ODE)
@@ -348,7 +362,7 @@ void Aftr::GLViewNewModule::loadMap()
    //worldLst->push_back( wo );
 
    ////Create the infinite grass plane (the floor)
-   wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
+//   wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
    wo->setPosition( Vector(0,0,50.0f) );
    wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
    wo->setLabel( "Grass" );
@@ -402,6 +416,8 @@ void Aftr::GLViewNewModule::loadMap()
    //netLst->push_back( wo );
    
    createNewModuleWayPoints();
+
+   
 }
 
 
@@ -416,3 +432,60 @@ void GLViewNewModule::createNewModuleWayPoints()
    wayPt->setPosition(Vector(0, 0, 0));//( 50, 0, 3 ) );
    worldLst->push_back( wayPt );
 }
+
+/*
+void GLViewNewModule::createTriangleMesh(WO* wo) {
+	// Code directly from the slides
+	// Get amount of vertices and indices
+
+	size_t vertexListSize = wo->getModel()->getModelDataShared()->getCompositeVertexList().size();
+	size_t indexListSize = wo->getModel()->getModelDataShared()->getCompositeIndexList().size();
+	float* vertexListCopy = new float[vertexListSize * 3];
+	unsigned int* indicesCopy = new unsigned int[indexListSize];
+
+	// Copy the values over
+	for (size_t i = 0; i < vertexListSize; i++)
+	{
+		vertexListCopy[i * 3 + 0] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).x;
+		vertexListCopy[i * 3 + 1] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).y;
+		vertexListCopy[i * 3 + 2] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).z;
+	}
+	for (size_t i = 0; i < indexListSize; i++)
+		indicesCopy[i] = wo->getModel()->getModelDataShared()->getCompositeIndexList().at(i);
+
+	// Build a new Triangle Mesh for PhysX
+	PxTriangleMeshDesc meshDesc;
+	meshDesc.points.count = static_cast<uint32_t>(vertexListSize);
+	meshDesc.points.stride = sizeof(float) * 3;
+	meshDesc.points.data = vertexListCopy;
+
+	meshDesc.triangles.count = static_cast<uint32_t>(indexListSize) / 3;
+	meshDesc.triangles.stride = 3 * sizeof(unsigned int);
+	meshDesc.triangles.data = indicesCopy;
+
+	// Cook the new mesh
+	PxDefaultMemoryOutputStream writeBuffer;
+	PxTriangleMeshCookingResult::Enum result;
+	bool status = physics_engine::gCooking->cookTriangleMesh(meshDesc, writeBuffer, &result);
+	if (!status)
+	{
+		std::cout << "Failed to create Triangular mesh" << std::endl;
+		std::cin.get();
+	}
+	PxDefaultMemoryInputData readBuffer(writeBuffer.getData(), writeBuffer.getSize());
+	PxTriangleMesh* mesh = physics_engine::gPhysics->createTriangleMesh(readBuffer);
+
+	// Attach a material
+	PxMaterial* gMaterial = physics_engine::gPhysics->createMaterial(0.5f, 0.5f, 0.6f);
+	PxShape* shape = physics_engine::gPhysics->createShape(PxTriangleMeshGeometry(mesh), *gMaterial, true);
+	PxTransform t({ 0,0,0 });
+
+	// Attach the shape created
+	PxRigidStatic* actor = physics_engine::gPhysics->createRigidStatic(t);
+	bool b = actor->attachShape(*shape);
+
+	// Bind this WO, and add to the scene
+	actor->userData = wo;
+	physics_engine::scene->addActor(*actor);
+}
+*/
