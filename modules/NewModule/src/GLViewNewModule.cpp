@@ -31,7 +31,8 @@
 
 //WONVPhysX include
 #include "WONVPhysX.h"
-#include "../../PhysX-4.1/physx/include/PxPhysicsAPI.h"
+#include "/Users/Alya/Desktop/Desktop Folders/College/Senior/Spring2020/CS4900/final-project-repository-vr-games/PhysX-4.1/physx/include/PxPhysicsAPI.h"
+//#include "../../PhysX-4.1/physx/include/PxPhysicsAPI.h"
 #include "WONVDynSphere.h"
 #include "AftrGLRendererBase.h"
 #include "WOGUILabel.h"
@@ -99,18 +100,26 @@ GLViewNewModule::~GLViewNewModule()
 
 void GLViewNewModule::updateWorld()
 {
-   GLView::updateWorld(); //Just call the parent's update world first.
-                          //If you want to add additional functionality, do it after
-                          //this call.
-   WONVPhysX::physUpdate();
-   if (GLViewNewModule::moveUp == true)
-	   carX++;
-   if (GLViewNewModule::moveDown == true)
-	   carX--;
-   if (GLViewNewModule::moveLeft == true)
+	GLView::updateWorld(); //Just call the parent's update world first.
+						   //If you want to add additional functionality, do it after
+						   //this call.
+	//WONVPhysX::physUpdate();
+	if (GLViewNewModule::moveUp == true) {
+		carAngle = 3.14159265;
+		carX++;
+	}
+	if (GLViewNewModule::moveDown == true) {
+		carAngle = 6.28318531;
+		carX--;
+	}
+   if (GLViewNewModule::moveLeft == true) {
+	   carAngle = -1.57079633;
 	   carY++;
-   if (GLViewNewModule::moveRight == true)
+   }
+   if (GLViewNewModule::moveRight == true) {
+	   carAngle = 1.57079633;
 	   carY--;
+   }
 }
 
 
@@ -305,6 +314,8 @@ void Aftr::GLViewNewModule::loadMap()
    ////create new WO
    wo = WO::New(wheeledCar, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);
    wo->setPosition(Vector(GLViewNewModule::carX ,GLViewNewModule::carY, GLViewNewModule::carZ));
+   CarLookDir = wo->getLookDirection();
+   wo->rotateAboutRelZ(carAngle); //1.57079633 -> right, neg for left, 3.14159265 -> forward (up), 6.28318531 -> backwards(down)
    wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
    ModelMeshSkin& carSkin = wo->getModel()->getModelDataShared()->getModelMeshes().at(0)->getSkins().at(0);
    carSkin.getMultiTextureSet().at(0)->setTextureRepeats(5.0f);
@@ -348,11 +359,11 @@ void Aftr::GLViewNewModule::loadMap()
    //worldLst->push_back( wo );
 
    ////Create the infinite grass plane (the floor)
-   wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
-   wo->setPosition( Vector(0,0,50.0f) );
-   wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
-   wo->setLabel( "Grass" );
-   worldLst->push_back( wo );
+  // wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
+  // wo->setPosition( Vector(0,0,50.0f) );
+   //wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
+   //wo->setLabel( "Grass" );
+   //worldLst->push_back( wo );
 
    //wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
    //wo->setPosition( Vector(0,0.5f,75.0f) );

@@ -36,10 +36,13 @@ public:
 
 protected:
 	std::string msg = " ";
-	double carX = 50.0;
-	double carY = 50.0;
-	double carZ = 5.0;
+	float carX = 50.0;
+	float carY = 50.0;
+	float carZ = 5.0;
 	bool moveUp, moveDown, moveLeft, moveRight;
+	Vector CarLookDir; //to store the look diretion of the car
+	float carAngle;
+	int carDir = 0; // 0=face forward, 1=face left, 2=face right, 3=face back
    GLViewNewModule( const std::vector< std::string >& args );
    virtual void onCreate();   
 };
