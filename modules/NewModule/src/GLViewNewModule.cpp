@@ -426,7 +426,7 @@ void Aftr::GLViewNewModule::loadMap()
    
    createNewModuleWayPoints();
 
-   this->physics = PxEngine::New();
+  // this->physics = PxEngine::New();
 }
 
 
@@ -441,7 +441,7 @@ void GLViewNewModule::createNewModuleWayPoints()
    wayPt->setPosition(Vector(0, 0, 0));//( 50, 0, 3 ) );
    worldLst->push_back( wayPt );
 }
-
+/*
 void GLViewNewModule::createTriangleMesh(WO* wo) {
 	size_t vertexListSize = wo->getModel()->getModelDataShared()->getCompositeVertexList().size();
 	size_t indexListSize = wo->getModel()->getModelDataShared()->getCompositeIndexList().size();
@@ -495,3 +495,4 @@ void GLViewNewModule::createTriangleMesh(WO* wo) {
 
 	this->physics->addActor(wo, actor);
 }
+*/

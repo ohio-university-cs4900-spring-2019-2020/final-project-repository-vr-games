@@ -46,10 +46,10 @@ protected:
 	int carDir = 0; // 0=face forward, 1=face left, 2=face right, 3=face back
    GLViewNewModule( const std::vector< std::string >& args );
    virtual void onCreate();
-   void createTriangleMesh(WO* wo);
-   PxEngine* physics;
-   float* vertexListCopy;
-   unsigned int* indicesCopy;
+   //void createTriangleMesh(WO* wo);
+   //PxEngine* physics;
+   //float* vertexListCopy;
+   //unsigned int* indicesCopy;
    
    /*
    physx::PxDefaultAllocator a;
