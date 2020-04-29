@@ -31,13 +31,14 @@
 
 //WONVPhysX include
 #include "WONVPhysX.h"
-#include "/Users/Alya/Desktop/Desktop Folders/College/Senior/Spring2020/CS4900/final-project-repository-vr-games/PhysX-4.1/physx/include/PxPhysicsAPI.h"
-//#include "../../PhysX-4.1/physx/include/PxPhysicsAPI.h"
+//#include "/Users/Alya/Desktop/Desktop Folders/College/Senior/Spring2020/CS4900/final-project-repository-vr-games/PhysX-4.1/physx/include/PxPhysicsAPI.h"
+#include "../../physx/include/PxPhysicsAPI.h"	//Eddie's path to PhysX folder
 #include "WONVDynSphere.h"
 #include "AftrGLRendererBase.h"
 #include "WOGUILabel.h"
 
 #include "NetMsgAntGsSetback.h"
+
 
 //If we want to use way points, we need to include this.
 #include "NewModuleWayPoints.h"
@@ -45,6 +46,7 @@
 #include <iostream>
 
 using namespace Aftr;
+using namespace physx;
 
 
 
@@ -89,6 +91,7 @@ void GLViewNewModule::onCreate()
    }
    this->setActorChaseType( STANDARDEZNAV ); //Default is STANDARDEZNAV mode
    //this->setNumPhysicsStepsPerRender( 0 ); //pause physics engine on start up; will remain paused till set to 1
+
 }
 
 
@@ -112,14 +115,14 @@ void GLViewNewModule::updateWorld()
 		carAngle = 6.28318531;
 		carX--;
 	}
-   if (GLViewNewModule::moveLeft == true) {
-	   carAngle = -1.57079633;
-	   carY++;
-   }
-   if (GLViewNewModule::moveRight == true) {
-	   carAngle = 1.57079633;
-	   carY--;
-   }
+	if (GLViewNewModule::moveLeft == true) {
+		carAngle = -1.57079633;
+		carY++;
+	}
+	if (GLViewNewModule::moveRight == true) {
+		carAngle = 1.57079633;
+		carY--;
+	}
 }
 
 
@@ -219,7 +222,8 @@ void GLViewNewModule::onKeyUp( const SDL_KeyboardEvent& key )
 }
 
 void GLViewNewModule::physXInit() {
-	/*PxDefaultAllocator a;
+	/*
+	PxDefaultAllocator a;
 	PxDefaultErrorCallback e;//this requires either extensions or inheriting
 	PxFoundation* f = PxCreateFoundation(PX_PHYSICS_VERSION, gAllocator, gErrorCallback);
 	PxPhysics* p = xCreatePhysics(PX_PHYSICS_VERSION, *gFoundation, PxTolerancesScale(), true, gPvd);
@@ -227,8 +231,8 @@ void GLViewNewModule::physXInit() {
 	//Some configuration return a null scene without setting the following
 		sc.filterShader = physx::PxDefaultSimulationFilterShader;
 	sc.cpuDispatcher = physx::PxDefaultCpuDispatcherCreate(2);
-	PxScene* scene = p->createScene(s);*/
-
+	PxScene* scene = p->createScene(s);
+	*/
 }
 
 
@@ -314,8 +318,6 @@ void Aftr::GLViewNewModule::loadMap()
    ////create new WO
    wo = WO::New(wheeledCar, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);
    wo->setPosition(Vector(GLViewNewModule::carX ,GLViewNewModule::carY, GLViewNewModule::carZ));
-   CarLookDir = wo->getLookDirection();
-   wo->rotateAboutRelZ(carAngle); //1.57079633 -> right, neg for left, 3.14159265 -> forward (up), 6.28318531 -> backwards(down)
    wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
    ModelMeshSkin& carSkin = wo->getModel()->getModelDataShared()->getModelMeshes().at(0)->getSkins().at(0);
    carSkin.getMultiTextureSet().at(0)->setTextureRepeats(5.0f);
@@ -325,6 +327,15 @@ void Aftr::GLViewNewModule::loadMap()
    carSkin.setSpecularCoefficient(10); // How "sharp" are the specular highlights (bigger is sharper, 1000 is very sharp, 10 is very dull)
    wo->setLabel("Car");
    worldLst->push_back(wo);
+
+   //create track
+   std::string track(ManagerEnvironmentConfiguration::getLMM() + "models/track.blend");
+   wo = WO::New(track, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);
+   //wo = WONVPhysX::New(track, Vector(1, 1, 1), MESH_SHADING_TYPE::mstFLAT);	//use for collisions?
+   wo->setPosition(Vector(0,0,0));
+   wo->setLabel("track");
+   worldLst->push_back(wo);
+
 
    //code for WO for Networking module
    NetMsgAntGsSetback();
@@ -339,6 +350,7 @@ void Aftr::GLViewNewModule::loadMap()
    label->setFontOrientation(FONT_ORIENTATION::foLEFT_TOP);
   // label->setFontPath("/COMIC.TTF");//ERROR here!!
    worldLst->push_back(label);
+
 
 
    ////Create the infinite grass plane that uses the Open Dynamics Engine (ODE)
@@ -359,11 +371,11 @@ void Aftr::GLViewNewModule::loadMap()
    //worldLst->push_back( wo );
 
    ////Create the infinite grass plane (the floor)
-  // wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
-  // wo->setPosition( Vector(0,0,50.0f) );
-   //wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
-   //wo->setLabel( "Grass" );
-   //worldLst->push_back( wo );
+//   wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
+   wo->setPosition( Vector(0,0,50.0f) );
+   wo->renderOrderType = RENDER_ORDER_TYPE::roOPAQUE;
+   wo->setLabel( "Grass" );
+   worldLst->push_back( wo );
 
    //wo = WONVPhysX::New( shinyRedPlasticCube, Vector(1,1,1), MESH_SHADING_TYPE::mstFLAT );
    //wo->setPosition( Vector(0,0.5f,75.0f) );
@@ -413,6 +425,8 @@ void Aftr::GLViewNewModule::loadMap()
    //netLst->push_back( wo );
    
    createNewModuleWayPoints();
+
+   this->physics = PxEngine::New();
 }
 
 
@@ -426,4 +440,58 @@ void GLViewNewModule::createNewModuleWayPoints()
    WOWayPointSpherical* wayPt = WOWP1::New( params, 3 );
    wayPt->setPosition(Vector(0, 0, 0));//( 50, 0, 3 ) );
    worldLst->push_back( wayPt );
+}
+
+void GLViewNewModule::createTriangleMesh(WO* wo) {
+	size_t vertexListSize = wo->getModel()->getModelDataShared()->getCompositeVertexList().size();
+	size_t indexListSize = wo->getModel()->getModelDataShared()->getCompositeIndexList().size();
+
+	this->vertexListCopy = new float[vertexListSize * 3];
+	this->indicesCopy = new unsigned int[indexListSize];
+
+	for (size_t i = 0; i < vertexListSize; i++)
+	{
+		this->vertexListCopy[i * 3 + 0] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).x;
+		this->vertexListCopy[i * 3 + 1] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).y;
+		this->vertexListCopy[i * 3 + 2] = wo->getModel()->getModelDataShared()->getCompositeVertexList().at(i).z;
+	}
+	for (size_t i = 0; i < indexListSize; i++)
+		this->indicesCopy[i] = wo->getModel()->getModelDataShared()->getCompositeIndexList().at(i);
+
+	PxTriangleMeshDesc meshDesc;
+	meshDesc.points.count = static_cast<uint32_t>(vertexListSize);
+	meshDesc.points.stride = sizeof(float) * 3;
+	meshDesc.points.data = vertexListCopy;
+
+	meshDesc.triangles.count = static_cast<uint32_t>(indexListSize) / 3;
+	meshDesc.triangles.stride = 3 * sizeof(unsigned int);
+	meshDesc.triangles.data = this->indicesCopy;
+
+	PxDefaultMemoryOutputStream writeBuffer;
+	PxTriangleMeshCookingResult::Enum result;
+
+	bool status = this->physics->cook->cookTriangleMesh(meshDesc, writeBuffer, &result);
+	if (!status)
+	{
+		std::cout << "Failed to create Triangular mesh" << std::endl;
+		std::cin.get();
+	}
+	PxDefaultMemoryInputData readBuffer(writeBuffer.getData(), writeBuffer.getSize());
+	PxTriangleMesh* mesh = this->physics->phys->createTriangleMesh(readBuffer);
+
+	PxMaterial* gMaterial = this->physics->phys->createMaterial(0.5f, 0.5f, 0.6f);
+	PxShape* shape = this->physics->phys->createShape(PxTriangleMeshGeometry(mesh), *gMaterial, true);
+	PxTransform t({ 0, 0, 0 });
+
+	Mat4 wo_pose = wo->getModel()->getDisplayMatrix();
+	PxRigidStatic* actor = this->physics->phys->createRigidStatic(t);
+	bool b = actor->attachShape(*shape);
+	float p[] = { wo_pose[0], wo_pose[1], wo_pose[2], wo_pose[3], wo_pose[4], wo_pose[5], wo_pose[6], wo_pose[7], wo_pose[8], wo_pose[9], wo_pose[10], wo_pose[11], wo_pose[12], wo_pose[13], wo_pose[14], wo_pose[15] };
+	Vector wo_position = wo->getPosition();
+	p[12] = wo_position[0];
+	p[13] = wo_position[1];
+	p[14] = wo_position[2];
+	actor->setGlobalPose(PxTransform(PxMat44(p)));
+
+	this->physics->addActor(wo, actor);
 }

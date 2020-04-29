@@ -1,6 +1,7 @@
 #pragma once
 
 #include "GLView.h"
+#include "PxEngine.h"
 
 namespace Aftr
 {
@@ -44,7 +45,20 @@ protected:
 	float carAngle;
 	int carDir = 0; // 0=face forward, 1=face left, 2=face right, 3=face back
    GLViewNewModule( const std::vector< std::string >& args );
-   virtual void onCreate();   
+   virtual void onCreate();
+   void createTriangleMesh(WO* wo);
+   PxEngine* physics;
+   float* vertexListCopy;
+   unsigned int* indicesCopy;
+   
+   /*
+   physx::PxDefaultAllocator a;
+   physx::PxFoundation* f;
+   physx::PxPhysics* p;
+   physx::PxScene* s;
+   physx::PxPvd* gpvd;
+   physx::PxDefaultCpuDispatcher* d;
+   */
 };
 
 }  //namespace Aftr
